@@ -2,7 +2,7 @@ from layer import *
 
 
 class gtnet(nn.Module):
-    def __init__(self, gcn_true, buildA_true, gcn_depth, num_nodes, device, predefined_A=None, static_feat=None, dropout=0.3, subgraph_size=13, node_dim=40, dilation_exponential=1, conv_channels=13, residual_channels=13, skip_channels=64, end_channels=128, seq_length=12, in_dim=2, out_dim=12, layers=3, propalpha=0.05, tanhalpha=3, layer_norm_affline=True):
+    def __init__(self, gcn_true, buildA_true, gcn_depth, num_nodes, device, predefined_A, static_feat, dropout, subgraph_size, node_dim, dilation_exponential, conv_channels, residual_channels, skip_channels, end_channels, seq_length, in_dim, out_dim, layers, propalpha, tanhalpha, layer_norm_affline):
         super(gtnet, self).__init__()
         self.gcn_true = gcn_true
         self.buildA_true = buildA_true
@@ -70,10 +70,11 @@ class gtnet(nn.Module):
                                              out_channels=end_channels,
                                              kernel_size=(1,1),
                                              bias=True)
+        # 确保 out_dim 参数与您的预测步数相等
         self.end_conv_2 = nn.Conv2d(in_channels=end_channels,
-                                             out_channels=out_dim,
-                                             kernel_size=(1,1),
-                                             bias=True)
+                                    out_channels=out_dim,  # 这里应该等于您的 seq_out_len
+                                    kernel_size=(1, 1),
+                                    bias=True)
         if self.seq_length > self.receptive_field:
             self.skip0 = nn.Conv2d(in_channels=in_dim, out_channels=skip_channels, kernel_size=(1, self.seq_length), bias=True)
             self.skipE = nn.Conv2d(in_channels=residual_channels, out_channels=skip_channels, kernel_size=(1, self.seq_length-self.receptive_field+1), bias=True)
@@ -88,7 +89,7 @@ class gtnet(nn.Module):
 
     def forward(self, input, idx=None):
         seq_len = input.size(3)
-        assert seq_len==self.seq_length, 'input sequence length not equal to preset sequence length'
+        # assert seq_len==self.seq_length, 'input sequence length not equal to preset sequence length'
 
         if self.seq_length<self.receptive_field:
             input = nn.functional.pad(input,(self.receptive_field-self.seq_length,0,0,0))

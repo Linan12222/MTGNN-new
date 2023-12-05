@@ -34,12 +34,12 @@ class DataLoaderS(object):
     def _batchify(self, idx_set, horizon):
         n = len(idx_set)
         X = torch.zeros((n, self.P, self.m))
-        Y = torch.zeros((n, self.m))
+        Y = torch.zeros((n, horizon, self.m))  # 修改Y为3D张量
         for i in range(n):
-            end = idx_set[i] - self.h + 1
+            end = idx_set[i] - horizon + 1
             start = end - self.P
             X[i, :, :] = torch.from_numpy(self.dat[start:end, :])
-            Y[i, :] = torch.from_numpy(self.dat[idx_set[i], :])
+            Y[i, :, :] = torch.from_numpy(self.dat[end:end + horizon, :])  # 包含未来seq_out_len步的数据
         return [X, Y]
 
     def get_batches(self, inputs, targets, batch_size, shuffle=True):

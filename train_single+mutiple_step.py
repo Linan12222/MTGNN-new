@@ -21,29 +21,33 @@ def evaluate(data, X, Y, model, batch_size):
     predict = None
     test = None
 
+    mse_loss = nn.MSELoss(reduction='sum')
+    mae_loss = nn.L1Loss(reduction='sum')
+
     for X, Y in data.get_batches(X, Y, batch_size, False):
-        X = torch.unsqueeze(X,dim=1)
-        X = X.transpose(2,3)
+        X = torch.unsqueeze(X, dim=1)
+        X = X.transpose(2, 3)
+        Y = Y.view(-1, args.seq_out_len, Y.size(-1))  # 修改Y的形状为[batch_size, seq_out_len, num_nodes]
         with torch.no_grad():
             output = model(X)
-        output = torch.squeeze(output)
-        if len(output.shape)==1:
-            output = output.unsqueeze(dim=0)
+
+        output = output.view(-1, args.seq_out_len, Y.size(-1))  # 调整输出的形状
+
         if predict is None:
             predict = output
             test = Y
         else:
-            predict = torch.cat((predict, output))
-            test = torch.cat((test, Y))
+            predict = torch.cat((predict, output), dim=0)
+            test = torch.cat((test, Y), dim=0)
 
-        mse_loss = nn.MSELoss(reduction='sum')
-        mae_loss = nn.L1Loss(reduction='sum')
-        mape_loss = torch.mean(torch.abs((Y - output) / Y)) if Y.sum() != 0 else 0
-
+        # 计算整个序列的损失
         total_mse += mse_loss(output, Y).item()
         total_mae += mae_loss(output, Y).item()
+        total_samples += Y.numel()
+
+        # 计算MAPE
+        mape_loss = torch.mean(torch.abs((Y - output) / Y)) if Y.sum() != 0 else 0
         total_mape += mape_loss.item() * Y.size(0)
-        total_samples += Y.size(0)
 
     mse = total_mse / total_samples
     rmse = math.sqrt(mse)
@@ -56,6 +60,7 @@ def evaluate(data, X, Y, model, batch_size):
     r_squared = 1 - ss_res / ss_total
 
     return rmse, mae, mse, r_squared, mape
+
 
 
 def train(data, X, Y, model, criterion, optim, batch_size):
@@ -78,9 +83,9 @@ def train(data, X, Y, model, criterion, optim, batch_size):
                 id = perm[j * num_sub:]
             id = torch.tensor(id).to(device)
             tx = X[:, :, id, :]
-            ty = Y[:, id]
+            ty = Y[:, :, id]  # 修改Y的形状为[batch_size, seq_out_len, num_nodes]
             output = model(tx, id)
-            output = torch.squeeze(output)
+            output = output.view(-1, args.seq_out_len, num_sub)
 
             loss = criterion(output, ty)
             loss.backward()
@@ -110,7 +115,7 @@ parser.add_argument('--device',type=str,default='cuda',help='')
 parser.add_argument('--gcn_true', type=bool, default=True, help='whether to add graph convolution layer')
 parser.add_argument('--buildA_true', type=bool, default=True, help='whether to construct adaptive adjacency matrix')
 parser.add_argument('--gcn_depth',type=int,default=2,help='graph convolution depth')
-parser.add_argument('--num_nodes',type=int,default=13,help='number of nodes/variables')
+parser.add_argument('--num_nodes',type=int,default=14,help='number of nodes/variables')
 parser.add_argument('--dropout',type=float,default=0.3,help='dropout rate')
 parser.add_argument('--subgraph_size',type=int,default=13,help='k')
 parser.add_argument('--node_dim',type=int,default=40,help='dim of nodes')
@@ -125,7 +130,7 @@ parser.add_argument('--seq_out_len',type=int,default=1,help='output sequence len
 parser.add_argument('--horizon', type=int, default=3)
 parser.add_argument('--layers',type=int,default=5,help='number of layers')
 
-parser.add_argument('--batch_size',type=int,default=128,help='batch size')
+parser.add_argument('--batch_size',type=int,default=64,help='batch size')
 parser.add_argument('--lr',type=float,default=0.001,help='learning rate')
 parser.add_argument('--weight_decay',type=float,default=0.001,help='weight decay rate')
 
@@ -145,10 +150,10 @@ torch.set_num_threads(3)
 
 def main():
 
-    Data = DataLoaderS(args.data, 0.8, 0.1, device, args.horizon, args.seq_in_len)
+    Data = DataLoaderS(args.data, 0.8, 0.1, device, args.seq_out_len, args.seq_in_len)
 
     model = gtnet(args.gcn_true, args.buildA_true, args.gcn_depth, args.num_nodes,
-                  device, dropout=args.dropout, subgraph_size=args.subgraph_size,
+                  device,None,None,dropout=args.dropout, subgraph_size=args.subgraph_size,
                   node_dim=args.node_dim, dilation_exponential=args.dilation_exponential,
                   conv_channels=args.conv_channels, residual_channels=args.residual_channels,
                   skip_channels=args.skip_channels, end_channels= args.end_channels,
@@ -200,9 +205,6 @@ def main():
         print('-' * 89)
         print('Exiting from training early')
 
-    # Load the best saved model.
-    with open(args.save, 'rb') as f:
-        model = torch.load(f)
 
 
     return val_rmse, val_mae, val_mse, val_r_squared, val_mape, test_rmse, test_mae, test_mse, test_r_squared, test_mape
