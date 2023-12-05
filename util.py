@@ -11,46 +11,19 @@ def normal_std(x):
 
 class DataLoaderS(object):
     # train and valid is the ratio of training set and validation set. test = 1 - train - valid
-    def __init__(self, file_name, train, valid, device, horizon, window, normalize=2):
+    def __init__(self, file_name, train, valid, device, horizon, window):
         self.P = window
         self.h = horizon
         fin = open(file_name)
-        self.rawdat = np.loadtxt(fin, delimiter=',')
-        self.dat = np.zeros(self.rawdat.shape)
+        self.rawdat = np.loadtxt(fin, delimiter='\t')
+        self.dat = self.rawdat
         self.n, self.m = self.dat.shape
-        self.normalize = 2
-        self.scale = np.ones(self.m)
-        self._normalized(normalize)
+
         self._split(int(train * self.n), int((train + valid) * self.n), self.n)
-
-        self.scale = torch.from_numpy(self.scale).float()
-        tmp = self.test[1] * self.scale.expand(self.test[1].size(0), self.m)
-
-        self.scale = self.scale.to(device)
-        self.scale = Variable(self.scale)
-
-        self.rse = normal_std(tmp)
-        self.rae = torch.mean(torch.abs(tmp - torch.mean(tmp)))
 
         self.device = device
 
-    def _normalized(self, normalize):
-        # normalized by the maximum value of entire matrix.
-
-        if (normalize == 0):
-            self.dat = self.rawdat
-
-        if (normalize == 1):
-            self.dat = self.rawdat / np.max(self.rawdat)
-
-        # normlized by the maximum value of each row(sensor).
-        if (normalize == 2):
-            for i in range(self.m):
-                self.scale[i] = np.max(np.abs(self.rawdat[:, i]))
-                self.dat[:, i] = self.rawdat[:, i] / np.max(np.abs(self.rawdat[:, i]))
-
     def _split(self, train, valid, test):
-
         train_set = range(self.P + self.h - 1, train)
         valid_set = range(train, valid)
         test_set = range(valid, self.n)
@@ -85,6 +58,7 @@ class DataLoaderS(object):
             Y = Y.to(self.device)
             yield Variable(X), Variable(Y)
             start_idx += batch_size
+
 
 class DataLoaderM(object):
     def __init__(self, xs, ys, batch_size, pad_with_last_sample=True):
@@ -203,21 +177,18 @@ def load_adj(pkl_filename):
     return adj
 
 
-def load_dataset(dataset_dir, batch_size, valid_batch_size= None, test_batch_size=None):
+def load_dataset(dataset_dir, batch_size, valid_batch_size=None, test_batch_size=None):
     data = {}
     for category in ['train', 'val', 'test']:
         cat_data = np.load(os.path.join(dataset_dir, category + '.npz'))
         data['x_' + category] = cat_data['x']
         data['y_' + category] = cat_data['y']
-    scaler = StandardScaler(mean=data['x_train'][..., 0].mean(), std=data['x_train'][..., 0].std())
-    # Data format
-    for category in ['train', 'val', 'test']:
-        data['x_' + category][..., 0] = scaler.transform(data['x_' + category][..., 0])
 
-    data['train_loader'] = DataLoaderM(data['x_train'], data['y_train'], batch_size)
-    data['val_loader'] = DataLoaderM(data['x_val'], data['y_val'], valid_batch_size)
-    data['test_loader'] = DataLoaderM(data['x_test'], data['y_test'], test_batch_size)
-    data['scaler'] = scaler
+    # 创建数据加载器
+    data['train_loader'] = DataLoaderS(data['x_train'], data['y_train'], batch_size)
+    data['val_loader'] = DataLoaderS(data['x_val'], data['y_val'], valid_batch_size)
+    data['test_loader'] = DataLoaderS(data['x_test'], data['y_test'], test_batch_size)
+
     return data
 
 
@@ -293,4 +264,3 @@ def normal_std(x):
 
 
 
-            

@@ -3,8 +3,8 @@ import math
 from net import *
 import util
 class Trainer():
-    def __init__(self, model, lrate, wdecay, clip, step_size, seq_out_len, scaler, device, cl=True):
-        self.scaler = scaler
+    def __init__(self, model, lrate, wdecay, clip, step_size, seq_out_len, device, cl=True):
+        self.scaler = None
         self.model = model
         self.model.to(device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=lrate, weight_decay=wdecay)
@@ -22,7 +22,7 @@ class Trainer():
         output = self.model(input, idx=idx)
         output = output.transpose(1,3)
         real = torch.unsqueeze(real_val,dim=1)
-        predict = self.scaler.inverse_transform(output)
+        predict = output
         if self.iter%self.step==0 and self.task_level<=self.seq_out_len:
             self.task_level +=1
         if self.cl:
@@ -47,7 +47,7 @@ class Trainer():
         output = self.model(input)
         output = output.transpose(1,3)
         real = torch.unsqueeze(real_val,dim=1)
-        predict = self.scaler.inverse_transform(output)
+        predict = output
         loss = self.loss(predict, real, 0.0)
         mape = util.masked_mape(predict,real,0.0).item()
         rmse = util.masked_rmse(predict,real,0.0).item()

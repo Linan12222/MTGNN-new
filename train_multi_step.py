@@ -18,8 +18,8 @@ def str_to_bool(value):
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--device',type=str,default='cuda:1',help='')
-parser.add_argument('--data',type=str,default='data/METR-LA',help='data path')
+parser.add_argument('--device',type=str,default='cuda:0',help='')
+parser.add_argument('--data',type=str,default='data/',help='data path')
 
 parser.add_argument('--adj_data', type=str,default='data/sensor_graph/adj_mx.pkl',help='adj data path')
 parser.add_argument('--gcn_true', type=str_to_bool, default=True, help='whether to add graph convolution layer')
@@ -28,7 +28,7 @@ parser.add_argument('--load_static_feature', type=str_to_bool, default=False,hel
 parser.add_argument('--cl', type=str_to_bool, default=True,help='whether to do curriculum learning')
 
 parser.add_argument('--gcn_depth',type=int,default=2,help='graph convolution depth')
-parser.add_argument('--num_nodes',type=int,default=207,help='number of nodes/variables')
+parser.add_argument('--num_nodes',type=int,default=14,help='number of nodes/variables')
 parser.add_argument('--dropout',type=float,default=0.3,help='dropout rate')
 parser.add_argument('--subgraph_size',type=int,default=20,help='k')
 parser.add_argument('--node_dim',type=int,default=40,help='dim of nodes')
@@ -42,7 +42,7 @@ parser.add_argument('--end_channels',type=int,default=128,help='end channels')
 
 parser.add_argument('--in_dim',type=int,default=2,help='inputs dimension')
 parser.add_argument('--seq_in_len',type=int,default=12,help='input sequence length')
-parser.add_argument('--seq_out_len',type=int,default=12,help='output sequence length')
+parser.add_argument('--seq_out_len',type=int,default=4,help='output sequence length')
 
 parser.add_argument('--layers',type=int,default=3,help='number of layers')
 parser.add_argument('--batch_size',type=int,default=64,help='batch size')
@@ -79,20 +79,11 @@ def main(runid):
     # np.random.seed(args.seed)
     #load data
     device = torch.device(args.device)
-    dataloader = load_dataset(args.data, args.batch_size, args.batch_size, args.batch_size)
-    scaler = dataloader['scaler']
+    dataloader = DataLoaderS(args.data, 0.8, 0.1, device, args.horizon, args.seq_in_len, args.normalize)
 
-    predefined_A = load_adj(args.adj_data)
-    predefined_A = torch.tensor(predefined_A)-torch.eye(args.num_nodes)
-    predefined_A = predefined_A.to(device)
-
-    # if args.load_static_feature:
-    #     static_feat = load_node_feature('data/sensor_graph/location.csv')
-    # else:
-    #     static_feat = None
 
     model = gtnet(args.gcn_true, args.buildA_true, args.gcn_depth, args.num_nodes,
-                  device, predefined_A=predefined_A,
+                  device, predefined_A=None,
                   dropout=args.dropout, subgraph_size=args.subgraph_size,
                   node_dim=args.node_dim,
                   dilation_exponential=args.dilation_exponential,
@@ -106,7 +97,7 @@ def main(runid):
     nParams = sum([p.nelement() for p in model.parameters()])
     print('Number of model parameters is', nParams)
 
-    engine = Trainer(model, args.learning_rate, args.weight_decay, args.clip, args.step_size1, args.seq_out_len, scaler, device, args.cl)
+    engine = Trainer(model, args.learning_rate, args.weight_decay, args.clip, args.step_size1, args.seq_out_len, device, args.cl)
 
     print("start training...",flush=True)
     his_loss =[]
@@ -118,12 +109,13 @@ def main(runid):
         train_mape = []
         train_rmse = []
         t1 = time.time()
-        dataloader['train_loader'].shuffle()
         for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
             trainx = torch.Tensor(x).to(device)
-            trainx= trainx.transpose(1, 3)
+            print(trainx.shape)
+            trainx = trainx.view(64, 13, 1)
             trainy = torch.Tensor(y).to(device)
-            trainy = trainy.transpose(1, 3)
+            print(trainy.shape)
+            trainy = trainy.view(64, 13, 1)
             if iter%args.step_size2==0:
                 perm = np.random.permutation(range(args.num_nodes))
             num_sub = int(args.num_nodes/args.num_split)
@@ -206,7 +198,7 @@ def main(runid):
     yhat = yhat[:realy.size(0),...]
 
 
-    pred = scaler.inverse_transform(yhat)
+    pred = yhat
     vmae, vmape, vrmse = metric(pred,realy)
 
     #test data
@@ -229,7 +221,8 @@ def main(runid):
     mape = []
     rmse = []
     for i in range(args.seq_out_len):
-        pred = scaler.inverse_transform(yhat[:, :, i])
+
+        pred = yhat[:, :, i]
         real = realy[:, :, i]
         metrics = metric(pred, real)
         log = 'Evaluate best model on test data for horizon {:d}, Test MAE: {:.4f}, Test MAPE: {:.4f}, Test RMSE: {:.4f}'

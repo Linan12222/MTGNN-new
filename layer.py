@@ -11,7 +11,12 @@ class nconv(nn.Module):
         super(nconv,self).__init__()
 
     def forward(self,x, A):
-        x = torch.einsum('ncwl,vw->ncvl',(x,A))
+        # 检查x的第三维度是否与A的第二维度匹配
+        if x.size(2) != A.size(1):
+            # 如果不匹配，调整x的第三维度以匹配A
+            x = x.narrow(2, 0, A.size(1))
+
+        x = torch.einsum('ncwl,vw->ncvl', (x, A))
         return x.contiguous()
 
 class dy_nconv(nn.Module):
@@ -53,27 +58,45 @@ class prop(nn.Module):
 
 
 class mixprop(nn.Module):
-    def __init__(self,c_in,c_out,gdep,dropout,alpha):
+    def __init__(self, c_in, c_out, gdep, dropout, alpha):
         super(mixprop, self).__init__()
         self.nconv = nconv()
-        self.mlp = linear((gdep+1)*c_in,c_out)
+        self.mlp = linear((gdep+1)*c_in, c_out)
         self.gdep = gdep
         self.dropout = dropout
         self.alpha = alpha
 
-
-    def forward(self,x,adj):
+    def forward(self, x, adj):
         adj = adj + torch.eye(adj.size(0)).to(x.device)
         d = adj.sum(1)
         h = x
         out = [h]
         a = adj / d.view(-1, 1)
+        target_dim = x.size(2)  # 记录x的初始第三维度大小
+
         for i in range(self.gdep):
-            h = self.alpha*x + (1-self.alpha)*self.nconv(h,a)
+            # 调整x的第三维度以匹配a的第二维度
+            if x.size(2) != a.size(1):
+                x = x.narrow(2, 0, a.size(1))
+
+            h = self.alpha * x + (1 - self.alpha) * self.nconv(h, a)
+
+            # 确保h的第三维度与target_dim一致
+            if h.size(2) < target_dim:
+                # 使用填充来增加h的第三维度
+                padding = (0, 0, 0, target_dim - h.size(2))
+                h = F.pad(h, padding, "constant", 0)
+            elif h.size(2) > target_dim:
+                # 使用narrow来减少h的第三维度
+                h = h.narrow(2, 0, target_dim)
+
             out.append(h)
-        ho = torch.cat(out,dim=1)
+
+        ho = torch.cat(out, dim=1)
         ho = self.mlp(ho)
         return ho
+
+
 
 class dy_mixprop(nn.Module):
     def __init__(self,c_in,c_out,gdep,dropout,alpha):
